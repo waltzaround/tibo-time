@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tibo-time",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-30",
+  "triggers": { "crons": ["*/5 * * * *"] },
+  "vars": {
+    "SOURCE": "x",
+    "X_USERNAME": "thsottiaux",
+    "OPENAI_MODEL": "gpt-6-luna",
+    "SOURCE_TIMEZONE": "America/Los_Angeles",
+    "DISPLAY_TIMEZONE": "Pacific/Auckland"
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "tibo-time",
+    "database_id": "00000000-0000-0000-0000-000000000000",
+    "migrations_dir": "migrations"
+  }],
+  "observability": { "enabled": true }
+}

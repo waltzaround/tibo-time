@@ -1,0 +1,29 @@
+{
+  "name": "tibo-time",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "check": "npm run typecheck && npm test",
+    "db:local": "wrangler d1 migrations apply DB --local",
+    "db:remote": "wrangler d1 migrations apply DB --remote",
+    "build": "wrangler deploy --dry-run --outdir dist"
+  },
+  "dependencies": {
+    "@js-temporal/polyfill": "0.5.1",
+    "fast-xml-parser": "5.11.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261013.1",
+    "@types/node": "26.6.5",
+    "miniflare": "5.20261006.2-beta",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "wrangler": "4.150.0"
+  },
+  "engines": { "node": ">=22" }
+}

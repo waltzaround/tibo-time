@@ -1,0 +1,15 @@
+# Never commit the filled-in .dev.vars file.
+DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/REPLACE_ID/REPLACE_TOKEN"
+ADMIN_TOKEN="replace-with-a-long-random-secret"
+
+# Default source: bearer token from the official X Developer Console
+X_BEARER_TOKEN="replace-with-your-x-app-bearer-token"
+
+# Luna classification and reset timing inference
+OPENAI_API_KEY="replace-with-your-openai-api-key"
+
+# Optional alternative, only if SOURCE=rss: feed for https://x.com/thsottiaux
+# RSS_FEED_URL="https://rss.app/feeds/REPLACE.xml"
+
+# Optional alternative, only if SOURCE=twitterapi: API key from TwitterAPI.io
+# TWITTERAPI_KEY=""
