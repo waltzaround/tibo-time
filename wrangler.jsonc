@@ -3,7 +3,7 @@
   "name": "tibo-time",
   "main": "src/index.ts",
   "compatibility_date": "2026-07-30",
-  "triggers": { "crons": ["*/5 * * * *"] },
+  "triggers": { "crons": ["*/10 * * * *"] },
   "vars": {
     "SOURCE": "x",
     "X_USERNAME": "thsottiaux",
@@ -14,7 +14,7 @@
   "d1_databases": [{
     "binding": "DB",
     "database_name": "tibo-time",
-    "database_id": "00000000-0000-0000-0000-000000000000",
+    "database_id": "99d16b7c-2381-468a-9b59-2b901e32d301",
     "migrations_dir": "migrations"
   }],
   "observability": { "enabled": true }

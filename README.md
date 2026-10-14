@@ -1,6 +1,6 @@
 # Tibo Time
 
-A Cloudflare Worker that watches [@thsottiaux](https://x.com/thsottiaux) through the official X API, uses OpenAI **GPT-6 Luna** to classify posts and infer reset timing, and sends ChatGPT / Codex reset announcements to a Discord webhook. Cloudflare runs a check every five minutes; D1 stores the startup baseline, pending posts, model decisions, delivery receipts, and a lease that prevents overlapping checks.
+A Cloudflare Worker that watches [@thsottiaux](https://x.com/thsottiaux) through the official X API, uses OpenAI **GPT-6 Luna** to classify posts and infer reset timing, and sends ChatGPT / Codex reset announcements to a Discord webhook. Cloudflare runs a check every ten minutes; D1 stores the startup baseline, pending posts, model decisions, delivery receipts, and a lease that prevents overlapping checks.
 
 The first successful check establishes a baseline and sends **no historical alerts**. Every subsequent new post is reviewed by Luna, including posts without the word "reset". The model distinguishes upcoming announcements and completed resets from unrelated posts, polls, requests, and ambiguous discussion. Only announcements/completed resets are delivered, with the original text and link. Model decisions are stored so repeated source reads and Discord retries do not normally trigger another analysis. The watcher does not confirm that your account's usage was actually reset.
 
@@ -15,7 +15,7 @@ Luna uses the post's publication timestamp to interpret relative phrases such as
 
 `OPENAI_MODEL` is configured as `gpt-6-luna`, using the Responses API with strict structured output and `store: false`. No web tools or other model tools are enabled. [OpenAI Docs: Luna](https://developers.openai.com/api/docs/models/gpt-6-luna), [structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
 
-The automated tests mock model responses to verify the API request, decision persistence, suppression, retries, and timezone conversion. A live model quality check requires the OpenAI API key, which will be supplied later.
+The automated tests mock model responses to verify the API request, decision persistence, suppression, retries, and timezone conversion. A live synthetic announcement check passed on 14 October 2026 using the configured OpenAI key and model.
 
 ## Choose a source
 
@@ -31,14 +31,18 @@ Prices checked on 14 October 2026:
 
 - **Official X:** US$0.005 per returned post and US$0.01 per user lookup, with no subscription or minimum spend. This worker caches the lookup and excludes reposts. For example, 300 new posts/month cost about US$1.50 plus the initial lookup and baseline fetch. Empty polls return no billable post resources. X normally deduplicates repeated reads in the same UTC day, but describes this as a soft guarantee. [Official pricing](https://docs.x.com/x-api/getting-started/pricing)
 - **OpenAI Luna:** US$0.10 per million input tokens and US$0.50 per million output tokens, billed separately from X. Each new post normally needs one analysis; empty polls make no model calls. Reasoning tokens and retries also affect usage. [OpenAI model pricing](https://developers.openai.com/api/docs/models/gpt-6-luna)
-- **TwitterAPI.io:** US$0.00015 per returned post, with a US$0.00015 minimum per call. Five-minute polling means 8,640 checks per 30 days: **US$1.296 minimum**, plus extra returned results, overlap reads, and pagination. This is an estimate, not a monthly cap. [Pricing](https://twitterapi.io/pricing), [account monitoring guide](https://twitterapi.io/blog/how-to-monitor-twitter-accounts-for-new-tweets-in-real-time)
+- **TwitterAPI.io:** US$0.00015 per returned post, with a US$0.00015 minimum per call. Ten-minute polling means 4,320 checks per 30 days: **US$0.648 minimum**, plus extra returned results, overlap reads, and pagination. This is an estimate, not a monthly cap. [Pricing](https://twitterapi.io/pricing), [account monitoring guide](https://twitterapi.io/blog/how-to-monitor-twitter-accounts-for-new-tweets-in-real-time)
 - **RSS:** bring any working feed for the account. [RSS.app](https://rss.app/rss-feed/create-twitter-rss-feed) can generate one from the profile URL. Its [Basic plan](https://rss.app/pricing) lists US$8.32/month billed annually with a **60-minute** provider refresh; Developer lists US$16.64/month billed annually with a **15-minute** refresh. Worker polling does not make a provider refresh sooner. Public [Nitter](https://github.com/zedeus/nitter) feeds may be disabled or unavailable; verify a feed returns recent posts before relying on it.
 
 This workload should fit Cloudflare's free Workers/D1 allowances, assuming small feeds and normal traffic. The Worker free tier also has a CPU limit; check invocation metrics after deployment. [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/), [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/)
 
 ## Deploy
 
-Requires Node.js 22+, a Cloudflare account, a Discord webhook, an X app bearer token, and an OpenAI API key with Luna access. Credentials have not been supplied and the watcher has not been deployed. No custom domain is required.
+Requires Node.js 22+, a Cloudflare account, a Discord webhook, an X app bearer token, and an OpenAI API key with Luna access. No custom domain is required.
+
+Deployment on 14 October 2026: https://tibo-time.waltissomewhere.workers.dev, with polling every ten minutes. D1 migrations and all four secrets are configured. All 27 tests, type checking, and the build pass. Live checks confirmed the public endpoint, admin authentication, Discord test-message delivery, and a separate OpenAI classification request. A Workers-incompatible redirect option was fixed and covered by a runtime regression test.
+
+**Monitoring is healthy:** after connecting the X app to production on 14 October 2026, `/check` initialized the baseline successfully without historical alerts. A second manual check confirmed incremental polling succeeds. `/health` returns HTTP 200 with `healthy: true`, no pending posts, and no current errors. Automatic polling was verified by a read-only status check at 11:22 pm NZDT on 14 October 2026: the last successful poll advanced to 11:20:07 pm NZDT without a manual check, matching the ten-minute schedule. Health was true, with zero consecutive failures and zero pending posts.
 
 1. Install and verify:
 
@@ -127,4 +131,4 @@ Use the admin client with `http://localhost:8787`. Local development uses a sepa
 - RSS monitoring can miss posts that leave the provider's limited feed between successful polls, and a provider serving stale but valid XML cannot be detected as an outage. API searches can also have indexing delays. `/health` checks successful polling and deliveries, not completeness or freshness of the upstream data.
 - API adapters paginate up to five pages per check. If more pages remain, the check fails and preserves the checkpoint; change the limit or catch up manually after an unusually large outage.
 - Source switching preserves the startup baseline and delivered IDs. TwitterAPI.io's first check after switching searches since startup; it may reread many posts. Pick a source before deploying for predictable costs.
-- Stopping or deleting the Worker stops polling. The D1 database contains stored alert text and delivery state; retain it to avoid losing pending messages. No external account or Discord channel was configured automatically.
+- Stopping or deleting the Worker stops polling. The D1 database contains stored alert text and delivery state; retain it to avoid losing pending messages. The configured Discord webhook received a labelled smoke-test message during deployment.

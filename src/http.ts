@@ -1,8 +1,12 @@
 import type { Fetcher } from "./types.ts";
 
 export class MonitorError extends Error {
-  constructor(public code: string, public retryAfterMs = 0) {
+  public code: string;
+  public retryAfterMs: number;
+  constructor(code: string, retryAfterMs = 0) {
     super(code);
+    this.code = code;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -13,7 +17,8 @@ export function errorCode(error: unknown): string {
 
 export async function request(fetcher: Fetcher, url: string | URL, init: RequestInit, service: string, timeoutMs = 12_000): Promise<Response> {
   try {
-    const response = await fetcher(url, { ...init, signal: AbortSignal.timeout(timeoutMs), redirect: "error" });
+    // Workers supports manual redirects; reject 3xx below without forwarding credentials.
+    const response = await fetcher(url, { ...init, signal: AbortSignal.timeout(timeoutMs), redirect: "manual" });
     if (!response.ok) {
       const retry = response.headers.get("retry-after");
       const seconds = Number(retry);
