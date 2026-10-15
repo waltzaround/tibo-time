@@ -1,6 +1,6 @@
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import { MonitorError, readText, request, requireHttps } from "./http.ts";
-import type { Env, Fetcher, Monitor, Post } from "./types.ts";
+import type { Env, Fetcher, Monitor, Post, PostContext } from "./types.ts";
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -95,6 +95,47 @@ export async function loadPosts(env: Env, monitor: Monitor, now: number, fetcher
   throw new MonitorError("invalid_source");
 }
 
+const contextFields = "created_at,note_tweet,author_id,referenced_tweets,in_reply_to_user_id";
+
+// Follow only explicit same-author edges, never merely nearby posts. The bound
+// limits extra API reads and prevents cycles or long threads consuming a poll.
+export async function officialContext(tweet: any, known: Map<string, any>, env: Env, userId: string, fetcher: Fetcher): Promise<PostContext[]> {
+  const context: PostContext[] = [];
+  const seen = new Set<string>([tweet.id]);
+  const queue = [tweet];
+  let lookups = 0;
+  while (queue.length && context.length < 3) {
+    const current = queue.shift();
+    for (const ref of current.referenced_tweets ?? []) {
+      if (context.length >= 3 || !["quoted", "replied_to"].includes(ref.type) || !/^\d{10,19}$/.test(ref.id) || seen.has(ref.id)) continue;
+      if (ref.type === "replied_to" && current.in_reply_to_user_id && current.in_reply_to_user_id !== userId) continue;
+      seen.add(ref.id);
+      if (!known.has(ref.id) && lookups < 3) {
+        lookups++;
+        const url = new URL(`https://api.x.com/2/tweets/${ref.id}`);
+        url.searchParams.set("tweet.fields", contextFields);
+        url.searchParams.set("expansions", "referenced_tweets.id");
+        try {
+          const body = await json(await request(fetcher, url, { headers: { Authorization: `Bearer ${env.X_BEARER_TOKEN}` } }, "x"), "x");
+          for (const item of [body.data, ...(body.includes?.tweets ?? [])]) if (item?.id) known.set(item.id, item);
+          if (!known.has(ref.id)) known.set(ref.id, null);
+        } catch (error) {
+          if (error instanceof MonitorError && ["x_http_403", "x_http_404"].includes(error.code)) known.set(ref.id, null);
+          else throw error; // Keep the checkpoint on transient failure so context can be retried.
+        }
+      }
+      const parent = known.get(ref.id);
+      if (!parent || parent.author_id !== userId) continue;
+      const text = parent.note_tweet?.text || parent.note_post?.text || parent.text;
+      if (typeof text !== "string" || !text.trim()) continue;
+      context.push({ id: parent.id, text, publishedAt: postDate(parent.id), author: env.X_USERNAME,
+        relation: ref.type, referencedBy: current.id });
+      queue.push(parent);
+    }
+  }
+  return context;
+}
+
 async function loadOfficial(env: Env, monitor: Monitor, fetcher: Fetcher): Promise<SourceResult> {
   if (!env.X_BEARER_TOKEN) throw new MonitorError("missing_x_bearer_token");
   const headers = { Authorization: `Bearer ${env.X_BEARER_TOKEN}` };
@@ -105,19 +146,23 @@ async function loadOfficial(env: Env, monitor: Monitor, fetcher: Fetcher): Promi
     userId = lookup.data.id as string;
   }
   const posts: Post[] = [];
+  const known = new Map<string, any>();
   const url = new URL(`https://api.x.com/2/users/${userId}/tweets`);
   url.searchParams.set("max_results", monitor.initialized_at === null ? "5" : "100");
   url.searchParams.set("exclude", "retweets"); // Replies can contain announcements.
-  url.searchParams.set("post.fields", "created_at,note_post");
+  url.searchParams.set("tweet.fields", contextFields);
+  url.searchParams.set("expansions", "referenced_tweets.id");
   if (monitor.initialized_at !== null && monitor.latest_id !== "0") url.searchParams.set("since_id", monitor.latest_id);
   for (let page = 0; page < 5; page++) {
     const body = await json(await request(fetcher, url, { headers }, "x"), "x");
     if (body.errors?.length || !body.meta || (body.data !== undefined && !Array.isArray(body.data))) throw new MonitorError("x_invalid_response");
+    for (const item of [...(body.data ?? []), ...(body.includes?.tweets ?? [])]) if (item?.id) known.set(item.id, item);
     for (const tweet of body.data ?? []) {
       if (typeof tweet.id !== "string" || !/^\d{10,19}$/.test(tweet.id) || typeof tweet.text !== "string" || (tweet.author_id && tweet.author_id !== userId)) throw new MonitorError("x_invalid_post");
-      const text = tweet.note_post?.text || tweet.note_tweet?.text || tweet.text;
+      const text = tweet.note_tweet?.text || tweet.note_post?.text || tweet.text;
       if (typeof text !== "string" || !text.trim()) throw new MonitorError("x_missing_post_text");
-      posts.push({ id: tweet.id, text, url: `https://x.com/${monitor.username}/status/${tweet.id}`, publishedAt: postDate(tweet.id) });
+      const context = monitor.initialized_at === null ? [] : await officialContext(tweet, known, env, userId, fetcher);
+      posts.push({ id: tweet.id, text, url: `https://x.com/${monitor.username}/status/${tweet.id}`, publishedAt: postDate(tweet.id), context });
     }
     // Initial run only establishes a baseline, without retrieving the full history.
     if (monitor.initialized_at === null || !body.meta.next_token) return { posts, userId };

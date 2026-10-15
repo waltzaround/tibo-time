@@ -35,8 +35,8 @@ export async function poll(env: Env, fetcher: Fetcher = fetch, now = Date.now())
       if (lease.initialized_at !== null) {
         for (const post of posts) {
           if (BigInt(post.id) <= BigInt(lease.baseline_id) || Date.parse(post.publishedAt) < lease.initialized_at) continue;
-          statements.push(db.prepare("INSERT OR IGNORE INTO alerts (username, post_id, text, url, published_at, queued_at) VALUES (?, ?, ?, ?, ?, ?)")
-            .bind(target, post.id, post.text, post.url, post.publishedAt, now));
+          statements.push(db.prepare("INSERT OR IGNORE INTO alerts (username, post_id, text, url, published_at, queued_at, context_json) VALUES (?, ?, ?, ?, ?, ?, ?)")
+            .bind(target, post.id, post.text, post.url, post.publishedAt, now, JSON.stringify(post.context ?? [])));
         }
       }
       // D1 batches are atomic: never move the checkpoint before persisting alerts.
@@ -55,7 +55,7 @@ export async function poll(env: Env, fetcher: Fetcher = fetch, now = Date.now())
         .bind(Date.now() + 180_000, target, owner).first();
       if (!renewed) throw new MonitorError("poll_lease_lost");
       try {
-        const post = { id: alert.post_id, text: alert.text, url: alert.url, publishedAt: alert.published_at };
+        const post = { id: alert.post_id, text: alert.text, url: alert.url, publishedAt: alert.published_at, context: JSON.parse(alert.context_json ?? "[]") };
         let analysis: ResetAnalysis;
         if (alert.analysis_json) {
           try { analysis = JSON.parse(alert.analysis_json); }

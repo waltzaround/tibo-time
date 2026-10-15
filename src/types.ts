@@ -18,6 +18,16 @@ export interface Post {
   text: string;
   url: string;
   publishedAt: string;
+  context?: PostContext[];
+}
+
+export interface PostContext {
+  id: string;
+  text: string;
+  publishedAt: string;
+  author: string;
+  relation: "quoted" | "replied_to";
+  referencedBy: string;
 }
 
 export interface Monitor {
@@ -40,6 +50,7 @@ export interface Alert {
   published_at: string;
   attempts: number;
   analysis_json: string | null;
+  context_json: string | null;
 }
 
 export interface ResetAnalysis {

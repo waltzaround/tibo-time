@@ -2,7 +2,21 @@
 
 A Cloudflare Worker that watches [@thsottiaux](https://x.com/thsottiaux) through the official X API, uses OpenAI **GPT-6 Luna** to classify posts and infer reset timing, and sends ChatGPT / Codex reset announcements to a Discord webhook. Cloudflare runs a check every ten minutes; D1 stores the startup baseline, pending posts, model decisions, delivery receipts, and a lease that prevents overlapping checks.
 
-The first successful check establishes a baseline and sends **no historical alerts**. Every subsequent new post is reviewed by Luna, including posts without the word "reset". The model distinguishes upcoming announcements and completed resets from unrelated posts, polls, requests, and ambiguous discussion. Only announcements/completed resets are delivered, with the original text and link. Model decisions are stored so repeated source reads and Discord retries do not normally trigger another analysis. The watcher does not confirm that your account's usage was actually reset.
+The first successful check establishes a baseline and sends **no historical alerts**. Every subsequent new post is reviewed by Luna, including posts without the word "reset". The model distinguishes upcoming announcements and completed resets from unrelated posts, polls, requests, and ambiguous discussion. Posts containing the standalone word “reset” (case-insensitive) always produce an alert, even if the model rejects them or fails. This explicit inclusion rule also covers jokes, denials, questions, and password resets. Other posts require an announcement/completion classification, using linked context where available. Alerts include the original text and link. Model decisions are stored so repeated source reads and Discord retries do not normally trigger another analysis. The watcher does not confirm that your account's usage was actually reset.
+
+## Linked-post classification fix (15 October 2026)
+
+A reset thread was fetched successfully but dismissed because classification saw each post in isolation: the root announcement used humorous wording, the timing reply omitted the subject, and the completion quoted that reply. The deployed fix recognizes informal rollout announcements and supplies up to three explicitly linked, same-author quote/reply ancestors to the model. Context is persisted in `alerts.context_json` so retries keep the same evidence. Other authors and unrelated nearby posts are not used as reset evidence. Timing must still be supported by the current post; completion does not reuse an old predicted window.
+
+The context fix passed 32 automated tests and seven opt-in live model cases, including the missed announcement, timing reply, completion, and negative controls. Real X API retrieval confirmed the two-level quote/reply chain. The context migration and updated Worker were deployed on 15 October 2026. The subsequent deterministic keyword rule passes 33 automated tests and the production build. Previously dismissed posts are not automatically replayed.
+
+Run the live model checks explicitly (uses API credits; does not send Discord messages):
+
+```sh
+node --env-file=.dev.vars --import tsx scripts/evaluate-reset-context.ts
+```
+
+Context expansion and bounded missing-parent lookups can incur additional X post-read charges. Unavailable/deleted ancestors are omitted; transient lookup failures preserve the source checkpoint for retry. Chains longer than three ancestors and non-X sources may still lack sufficient context.
 
 ## Reset timing
 
@@ -97,6 +111,8 @@ Deployment on 14 October 2026: https://tibo-time.waltissomewhere.workers.dev, wi
 
 The root endpoint identifies the service; it does not indicate monitoring health. `/status`, `/health`, `/check`, and `/test-webhook` require `Authorization: Bearer <ADMIN_TOKEN>`. Tokens in URL query strings are not accepted.
 
+For a labelled completed-reset demo, send an authenticated `POST /test-webhook?demo=completed`. It uses the live Worker’s configured webhook, so production webhook changes apply immediately. Plain `/test-webhook` sends the standard connectivity test.
+
 To avoid putting a token in shell history, use a small interactive client:
 
 ```sh
@@ -124,7 +140,7 @@ Use the admin client with `http://localhost:8787`. Local development uses a sepa
 
 ## Delivery and limits
 
-- New posts are written to D1 before advancing the source checkpoint. Classification failures and failed deliveries remain queued even if the post disappears from the RSS feed. The worker retries them on subsequent checks, including when the source is unavailable. An OpenAI outage does not bypass classification or silently discard a post.
+- New posts are written to D1 before advancing the source checkpoint. Classification failures and failed deliveries remain queued even if the post disappears from the RSS feed. The worker retries them on subsequent checks, including when the source is unavailable. An OpenAI outage keeps non-keyword posts queued. Literal “reset” mentions use the deterministic keyword rule with unknown timing if model analysis fails.
 - The worker processes up to five queued posts per check, uses exponential retry delays, honors `Retry-After`, and disables automatic mentions. A cached model decision is reused for delivery retries. `wait=true` requires Discord to return a saved-message receipt.
 - Delivery is **at least once**. Normal repeats are deduplicated by account and post ID. If Discord accepts a message but the response or subsequent D1 write fails, a retry may create a duplicate; Discord webhooks offer no atomic transaction with D1.
 - RSS feeds must expose direct post links such as `/thsottiaux/status/<id>`. The parser accepts mirror links and normalizes them to X. It rejects HTML challenges, invalid XML, empty feeds, or feeds without posts from the target account. It uses X snowflake IDs for publication dates, so provider refresh timestamps do not revive old posts.

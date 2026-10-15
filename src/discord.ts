@@ -1,6 +1,19 @@
 import { MonitorError, readText, request, requireHttps } from "./http.ts";
 import type { Fetcher, Post, ResetAnalysis } from "./types.ts";
 
+export async function sendResetDemo(webhook: string, account: string, fetcher: Fetcher): Promise<string> {
+  return sendDiscord(webhook, account, {
+    id: "demo", text: "TEST / DEMO — This demonstrates a completed ChatGPT / Codex usage reset. No real reset is being announced.",
+    url: `https://x.com/${account}`, publishedAt: new Date().toISOString(),
+  }, async (url, init) => {
+    const body = JSON.parse(String(init?.body));
+    body.embeds[0].title = "🧪 DEMO — ChatGPT / Codex reset completed";
+    body.embeds[0].footer = { text: "Test message only · Not a real reset announcement" };
+    return fetcher(url, { ...init, body: JSON.stringify(body) });
+  }, { classification: "completed", summary: "Demo reset", precision: "unknown", startsAt: null, endsAt: null,
+    timeZone: null, sourceTimeText: null, assumptions: [], model: "demo" });
+}
+
 export function webhookUrl(value: string): URL {
   const url = requireHttps(value, "discord_webhook_url");
   if (!["discord.com", "canary.discord.com", "ptb.discord.com", "discordapp.com"].includes(url.hostname) || !/^\/api(?:\/v\d+)?\/webhooks\/\d+\/[^/]+$/.test(url.pathname)) throw new MonitorError("invalid_discord_webhook_url");

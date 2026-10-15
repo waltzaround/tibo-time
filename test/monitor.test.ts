@@ -30,7 +30,7 @@ async function setup(t: TestContext): Promise<Env> {
   }));
   t.after(() => mf.dispose());
   const db = await mf.getD1Database("DB");
-  for (const migration of ["0001_initial.sql", "0002_luna_analysis.sql"]) {
+  for (const migration of ["0001_initial.sql", "0002_luna_analysis.sql", "0003_post_context.sql"]) {
     const schema = await readFile(new NodeURL(`../migrations/${migration}`, import.meta.url), "utf8");
     for (const statement of schema.split(";").filter((s) => s.trim())) await db.prepare(statement).run();
   }
@@ -240,7 +240,8 @@ test("official API caches the user lookup, uses since_id, and reads long posts",
     assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer test-token");
     if (url.pathname.includes("by/username")) return Response.json({ data: { id: "42", username: "thsottiaux" } });
     assert.equal(url.searchParams.get("exclude"), "retweets");
-    assert.equal(url.searchParams.get("post.fields"), "created_at,note_post");
+    assert.ok(url.searchParams.get("tweet.fields")?.includes("referenced_tweets"));
+    assert.equal(url.searchParams.get("expansions"), "referenced_tweets.id");
     if (initial) return Response.json({ data: [{ id: oldId, author_id: "42", text: "Old reset." }], meta: { result_count: 1 } });
     assert.equal(url.searchParams.get("since_id"), oldId);
     return Response.json({ data: [{ id: newId, author_id: "42", text: "Long update...", note_post: { text: "Long update with a reset for everyone." } }], meta: { result_count: 1 } });
@@ -332,7 +333,7 @@ test("negative model decisions are saved, suppressed, and never reanalyzed", asy
   const env = await setup(t);
   const h = harness();
   await poll(env, h.fetcher, now);
-  h.setFeed(rss([{ id: newId, text: "Should we do a reset? Vote!" }]));
+  h.setFeed(rss([{ id: newId, text: "Should we increase usage? Vote!" }]));
   h.setAnalysis({
     classification: "not_reset", summary: "A poll, not an announcement.", precision: "unknown",
     starts_at_local: null, ends_at_local: null, time_zone: null, source_time_text: null, assumptions: [],
@@ -349,14 +350,35 @@ test("an OpenAI outage keeps posts queued for retry instead of sending unchecked
   const env = await setup(t);
   const h = harness();
   await poll(env, h.fetcher, now);
-  h.setFeed(rss([{ id: newId, text: "All usage reset." }]));
+  h.setFeed(rss([{ id: newId, text: "Fresh usage for everyone." }]));
   h.setModelStatus(503);
   await assert.rejects(poll(env, h.fetcher, now + 300_000), /openai_http_503/);
   assert.equal(h.sends.length, 0);
   assert.equal((await status(env, now + 300_000)).pendingPosts, 1);
   h.setFeed(rss([{ id: oldId, text: "Old reset." }]));
   h.setModelStatus(200);
+  h.setAnalysis({classification:"announced",summary:"Fresh usage.",precision:"unknown",starts_at_local:null,ends_at_local:null,time_zone:null,source_time_text:null,assumptions:[]});
   await poll(env, h.fetcher, now + 600_000);
   assert.equal(h.sends.length, 1);
   assert.equal(h.analyses.length, 2);
+});
+
+test("linked context survives a model outage and reaches the retry", async (t) => {
+  const env = { ...await setup(t), SOURCE: "x" as const, X_BEARER_TOKEN: "test" };
+  const h = harness();
+  await poll({ ...env, SOURCE: "rss" }, h.fetcher, now);
+  await env.DB.prepare("UPDATE monitors SET x_user_id = '42'").run();
+  h.setModelStatus(503);
+  let fresh = true;
+  const fetcher: Fetcher = async (input, init) => {
+    if (new URL(input).hostname !== 'api.x.com') return h.fetcher(input, init);
+    return Response.json({ data: fresh ? [{id:newId, author_id:'42', text:'Done and dusted', referenced_tweets:[{id:oldId,type:'quoted'}]}] : [], includes:{tweets:[{id:oldId,author_id:'42',text:'Reset incoming'}]}, meta:{result_count:fresh?1:0} });
+  };
+  await assert.rejects(poll(env, fetcher, now+300_000), /openai_http_503/);
+  fresh = false;
+  h.setModelStatus(200);
+  await poll(env, fetcher, now+600_000);
+  const input = JSON.parse(h.analyses[1].input[0].content);
+  assert.equal(input.linked_context[0].text, 'Reset incoming');
+  assert.equal(input.linked_context[0].referencedBy, newId);
 });

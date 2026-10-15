@@ -99,6 +99,24 @@ test("refused, incomplete, and malformed outputs fail visibly without a false de
     { status: "completed", output: [{ type: "message", content: [{ type: "refusal", refusal: "No" }] }] },
     { status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: "not JSON" }] }] },
   ]) {
-    await assert.rejects(analyzePost(env, post, async () => Response.json(response)));
+    await assert.rejects(analyzePost(env, { ...post, text: "Fresh usage tomorrow." }, async () => Response.json(response)));
   }
+});
+
+test("literal reset mentions override negative decisions and model outages", async () => {
+  const env = { OPENAI_API_KEY: "test-key" } as Env;
+  const negative = raw({ classification: "not_reset", precision:"unknown", starts_at_local:null, ends_at_local:null, time_zone:null, source_time_text:null });
+  const fetchers: Fetcher[] = [
+    async () => Response.json({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify(negative)}]}]}),
+    async () => new Response(null,{status:503}),
+  ];
+  for (const text of ['Day 10/ Reset', 'No RESET today.', 'Password reset is done.', 'Should we do a reset?']) {
+    for (const fetcher of fetchers) {
+      const result = await analyzePost(env,{...post,text},fetcher);
+      assert.equal(isReset(result),true);
+      assert.equal(result.precision,'unknown');
+      assert.equal(result.model,'keyword rule');
+    }
+  }
+  await assert.rejects(analyzePost(env,{...post,text:'Preset settings updated.'},fetchers[1]));
 });

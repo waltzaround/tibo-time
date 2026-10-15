@@ -1,4 +1,4 @@
-import { sendDiscord } from "./discord.ts";
+import { sendDiscord, sendResetDemo } from "./discord.ts";
 import { errorCode } from "./http.ts";
 import { poll, status, username } from "./monitor.ts";
 import type { Env } from "./types.ts";
@@ -32,7 +32,9 @@ export default {
         return json(result, result.busy ? 409 : 200);
       }
       if (path === "/test-webhook" && request.method === "POST") {
-        const id = await sendDiscord(env.DISCORD_WEBHOOK_URL, username(env), null, fetch);
+        const demo = new URL(request.url).searchParams.get("demo") === "completed";
+        const id = demo ? await sendResetDemo(env.DISCORD_WEBHOOK_URL, username(env), fetch)
+          : await sendDiscord(env.DISCORD_WEBHOOK_URL, username(env), null, fetch);
         return json({ sent: true, messageId: id });
       }
       return json({ error: "not_found" }, 404);
