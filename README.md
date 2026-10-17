@@ -62,7 +62,7 @@ Tibo Time uses Cloudflare D1 to remember which posts have been checked, prevent 
 npx wrangler d1 create tibo-time
 ```
 
-Copy the database ID returned by Cloudflare into `wrangler.jsonc`, replacing the placeholder `database_id`.
+Copy the database ID returned by Cloudflare into `wrangler.jsonc`, replacing the existing `database_id` with your own.
 
 Apply the database migrations:
 
@@ -72,14 +72,27 @@ npm run db:remote
 
 **4. Configure your credentials**
 
-Create a Discord webhook under:
+Choose Discord, Slack, or both.
 
-**Channel Settings → Integrations → Webhooks**
-
-Then add your credentials to Cloudflare:
+For Discord, create a webhook under **Channel Settings → Integrations → Webhooks**, then save it as a secret:
 
 ```bash
 npx wrangler secret put DISCORD_WEBHOOK_URL
+```
+
+For Slack, create a Slack app, enable **Incoming Webhooks**, choose **Add New Webhook to Workspace**, and select your channel. Save the generated URL as a secret:
+
+```bash
+npx wrangler secret put SLACK_WEBHOOK_URL
+```
+
+See [Slack’s incoming webhook setup guide](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/). The webhook determines the channel; Tibo Time does not need a Slack bot token.
+
+At least one webhook must be configured. With both secrets present, new alerts go to both destinations. Completed deliveries are recorded separately, so a failure on one service does not cause a normal retry to resend to the other. Adding Slack does not replay posts already marked delivered.
+
+Then add the remaining credentials to Cloudflare:
+
+```bash
 npx wrangler secret put X_BEARER_TOKEN
 npx wrangler secret put OPENAI_API_KEY
 npx wrangler secret put ADMIN_TOKEN
@@ -115,10 +128,16 @@ From here you can:
 
 - Check monitoring status
 - Trigger a manual check
-- Send a test Discord notification
+- Send a test notification to Discord or Slack, including a labelled completed-reset demo
 - Check service health
 
+For webhook tests, the admin client lets you choose Discord or Slack. The authenticated endpoints also accept `POST /test-webhook?target=slack` or `POST /test-webhook?target=slack&demo=completed`. Without a target, tests use Discord when configured, otherwise Slack.
+
 The first successful check establishes a baseline, so you won't receive notifications for old posts.
+
+### Upgrading an existing installation for Slack
+
+Run `npm run db:remote` before `npm run deploy` to add the Slack delivery column (`0004_slack_delivery.sql`). Keep `DISCORD_WEBHOOK_URL` to continue Discord alerts, or remove it from Cloudflare for Slack-only operation. Deployments preserve existing secrets.
 
 ## A few things worth knowing
 
@@ -164,7 +183,7 @@ npm run dev
 
 The local Worker runs at `http://localhost:8787`.
 
-Note that local development uses a separate database, but actual X API requests, OpenAI calls and Discord notifications can still incur costs or send real messages.
+Note that local development uses a separate database, but actual X API requests, OpenAI calls and Discord/Slack notifications can still incur costs or send real messages.
 
 To validate changes:
 

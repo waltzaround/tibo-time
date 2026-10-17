@@ -8,7 +8,16 @@ try {
   const token = await rl.question("Admin token (input is visible in this terminal): ");
   const action = (await rl.question("Action [status, health, check, test-webhook]: ")).trim();
   if (!["status", "health", "check", "test-webhook"].includes(action)) throw new Error("Unknown action.");
-  const response = await fetch(new URL(`/${action}`, base), {
+  const url = new URL(`/${action}`, base);
+  if (action === "test-webhook") {
+    const destination = (await rl.question("Destination [default, discord, slack]: ")).trim();
+    if (destination && destination !== "default") {
+      if (!["discord", "slack"].includes(destination)) throw new Error("Unknown destination.");
+      url.searchParams.set("target", destination);
+    }
+    if ((await rl.question("Send a completed-reset demo? [y/N]: ")).trim().toLowerCase() === "y") url.searchParams.set("demo", "completed");
+  }
+  const response = await fetch(url, {
     method: ["status", "health"].includes(action) ? "GET" : "POST",
     headers: { Authorization: `Bearer ${token}` },
     redirect: "error",

@@ -1,4 +1,5 @@
 import { sendDiscord, webhookUrl } from "./discord.ts";
+import { sendSlack, slackWebhookUrl } from "./slack.ts";
 import { analyzePost, isReset, sourceTimezone } from "./analyze.ts";
 import { errorCode, MonitorError } from "./http.ts";
 import { loadPosts } from "./sources.ts";
@@ -23,7 +24,9 @@ export async function poll(env: Env, fetcher: Fetcher = fetch, now = Date.now())
   let dismissed = 0;
   let failure: unknown;
   try {
-    webhookUrl(env.DISCORD_WEBHOOK_URL);
+    if (!env.DISCORD_WEBHOOK_URL && !env.SLACK_WEBHOOK_URL) throw new MonitorError("missing_notification_webhook");
+    if (env.DISCORD_WEBHOOK_URL) webhookUrl(env.DISCORD_WEBHOOK_URL);
+    if (env.SLACK_WEBHOOK_URL) slackWebhookUrl(env.SLACK_WEBHOOK_URL);
     if (!env.OPENAI_API_KEY) throw new MonitorError("missing_openai_api_key");
     sourceTimezone(env);
     try {
@@ -70,9 +73,31 @@ export async function poll(env: Env, fetcher: Fetcher = fetch, now = Date.now())
           dismissed++;
           continue;
         }
-        const id = await sendDiscord(env.DISCORD_WEBHOOK_URL, target, post, fetcher, analysis, env.DISPLAY_TIMEZONE);
-        await db.prepare("UPDATE alerts SET sent_at = ?, discord_message_id = ?, last_error = NULL WHERE username = ? AND post_id = ?")
-          .bind(now, id, target, alert.post_id).run();
+        // Save each destination immediately. If one fails, its retry must not
+        // resend to the destination that already accepted the alert.
+        let deliveryFailure: unknown;
+        if (env.DISCORD_WEBHOOK_URL && !alert.discord_message_id) {
+          try {
+            const id = await sendDiscord(env.DISCORD_WEBHOOK_URL, target, post, fetcher, analysis, env.DISPLAY_TIMEZONE);
+            await db.prepare("UPDATE alerts SET discord_message_id = ? WHERE username = ? AND post_id = ?")
+              .bind(id, target, alert.post_id).run();
+          } catch (error) { deliveryFailure = error; }
+        }
+        if (env.SLACK_WEBHOOK_URL && alert.slack_sent_at === null) {
+          try {
+            await sendSlack(env.SLACK_WEBHOOK_URL, target, post, fetcher, analysis, env.DISPLAY_TIMEZONE);
+            await db.prepare("UPDATE alerts SET slack_sent_at = ? WHERE username = ? AND post_id = ?")
+              .bind(now, target, alert.post_id).run();
+          } catch (error) {
+            deliveryFailure = deliveryFailure ? new MonitorError(errorCode(deliveryFailure), Math.max(
+              deliveryFailure instanceof MonitorError ? deliveryFailure.retryAfterMs : 0,
+              error instanceof MonitorError ? error.retryAfterMs : 0,
+            )) : error;
+          }
+        }
+        if (deliveryFailure) throw deliveryFailure;
+        await db.prepare("UPDATE alerts SET sent_at = ?, last_error = NULL WHERE username = ? AND post_id = ?")
+          .bind(now, target, alert.post_id).run();
         sent++;
       } catch (error) {
         const backoff = Math.min(3_600_000, 300_000 * 2 ** Math.min(alert.attempts, 4));
@@ -101,5 +126,7 @@ export async function status(env: Env, now = Date.now()) {
   const state = await env.DB.prepare("SELECT username, initialized_at, last_poll_at, last_success_at, last_error, consecutive_failures FROM monitors WHERE username = ?").bind(target).first<Monitor>();
   const pending = await env.DB.prepare("SELECT COUNT(*) AS count, MAX(attempts) AS attempts FROM alerts WHERE username = ? AND sent_at IS NULL AND dismissed_at IS NULL").bind(target).first<{ count: number; attempts: number | null }>();
   const healthy = Boolean(state?.last_success_at && now - state.last_success_at < 20 * 60_000 && !state.consecutive_failures && !pending?.attempts);
-  return { healthy, source: env.SOURCE, model: env.OPENAI_MODEL || "gpt-6-luna", monitor: state, pendingPosts: pending?.count ?? 0 };
+  return { healthy, source: env.SOURCE, model: env.OPENAI_MODEL || "gpt-6-luna",
+    destinations: { discord: Boolean(env.DISCORD_WEBHOOK_URL), slack: Boolean(env.SLACK_WEBHOOK_URL) },
+    monitor: state, pendingPosts: pending?.count ?? 0 };
 }

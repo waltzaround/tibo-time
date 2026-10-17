@@ -30,7 +30,7 @@ async function setup(t: TestContext): Promise<Env> {
   }));
   t.after(() => mf.dispose());
   const db = await mf.getD1Database("DB");
-  for (const migration of ["0001_initial.sql", "0002_luna_analysis.sql", "0003_post_context.sql"]) {
+  for (const migration of ["0001_initial.sql", "0002_luna_analysis.sql", "0003_post_context.sql", "0004_slack_delivery.sql"]) {
     const schema = await readFile(new NodeURL(`../migrations/${migration}`, import.meta.url), "utf8");
     for (const statement of schema.split(";").filter((s) => s.trim())) await db.prepare(statement).run();
   }
@@ -381,4 +381,48 @@ test("linked context survives a model outage and reaches the retry", async (t) =
   const input = JSON.parse(h.analyses[1].input[0].content);
   assert.equal(input.linked_context[0].text, 'Reset incoming');
   assert.equal(input.linked_context[0].referencedBy, newId);
+});
+
+for (const failing of ['slack', 'discord'] as const) {
+  test(`both destinations retry only the failed ${failing} delivery`, async (t) => {
+    const env={...await setup(t),SLACK_WEBHOOK_URL:'https://hooks.slack.com/services/T123/B123/test'};
+    const h=harness();
+    await poll(env,h.fetcher,now);
+    h.setFeed(rss([{id:newId,text:'Reset complete.'}]));
+    let fail=true, discord=0, slack=0;
+    const fetcher:Fetcher=async(input,init)=>{
+      const host=new URL(input).hostname;
+      if(host==='hooks.slack.com') {slack++;return new Response(fail&&failing==='slack'?'failed':'ok',{status:fail&&failing==='slack'?503:200});}
+      if(host==='discord.com') {discord++;if(fail&&failing==='discord') return new Response(null,{status:503});}
+      return h.fetcher(input,init);
+    };
+    await assert.rejects(poll(env,fetcher,now+300000),new RegExp(`${failing}_http_503`));
+    assert.equal(discord,1);assert.equal(slack,1);
+    assert.equal((await status(env,now+300000)).healthy,false);
+    fail=false;
+    const result=await poll(env,fetcher,now+600000);
+    assert.equal(result.sent,1);
+    assert.equal(discord,failing==='discord'?2:1);
+    assert.equal(slack,failing==='slack'?2:1);
+    assert.equal(h.analyses.length,1);
+    const receipt=await env.DB.prepare('SELECT sent_at,slack_sent_at,discord_message_id FROM alerts').first();
+    assert.ok(receipt?.sent_at);assert.ok(receipt?.slack_sent_at);assert.ok(receipt?.discord_message_id);
+    assert.equal((await status(env,now+600000)).healthy,true);
+  });
+}
+
+test('Slack-only configuration delivers without requiring Discord',async(t)=>{
+  const env={...await setup(t),DISCORD_WEBHOOK_URL:undefined,SLACK_WEBHOOK_URL:'https://hooks.slack.com/services/T123/B123/test'};
+  const h=harness();
+  const fetcher:Fetcher=async(input,init)=>new URL(input).hostname==='hooks.slack.com'?new Response('ok'):h.fetcher(input,init);
+  await poll(env,fetcher,now);
+  h.setFeed(rss([{id:newId,text:'Reset complete.'}]));
+  assert.equal((await poll(env,fetcher,now+300000)).sent,1);
+  assert.equal(h.sends.length,0);
+  assert.equal((await status(env,now+300000)).healthy,true);
+});
+
+test('notifications require at least one configured destination',async(t)=>{
+  const env={...await setup(t),DISCORD_WEBHOOK_URL:undefined};
+  await assert.rejects(poll(env,harness().fetcher,now),/missing_notification_webhook/);
 });

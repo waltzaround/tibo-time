@@ -1,5 +1,6 @@
 import { sendDiscord, sendResetDemo } from "./discord.ts";
-import { errorCode } from "./http.ts";
+import { sendSlack } from "./slack.ts";
+import { errorCode, MonitorError } from "./http.ts";
 import { poll, status, username } from "./monitor.ts";
 import type { Env } from "./types.ts";
 
@@ -33,6 +34,16 @@ export default {
       }
       if (path === "/test-webhook" && request.method === "POST") {
         const demo = new URL(request.url).searchParams.get("demo") === "completed";
+        const destination = new URL(request.url).searchParams.get("target") ?? (env.DISCORD_WEBHOOK_URL ? "discord" : "slack");
+        if (destination === "slack") {
+          if (!env.SLACK_WEBHOOK_URL) throw new MonitorError("missing_slack_webhook");
+          const analysis = demo ? { classification: "completed" as const, summary: "Demo reset", precision: "unknown" as const,
+            startsAt: null, endsAt: null, timeZone: null, sourceTimeText: null, assumptions: [], model: "demo" } : undefined;
+          await sendSlack(env.SLACK_WEBHOOK_URL, username(env), null, fetch, analysis, env.DISPLAY_TIMEZONE, demo);
+          return json({ sent: true, target: "slack" });
+        }
+        if (destination !== "discord") return json({ error: "invalid_notification_target" }, 400);
+        if (!env.DISCORD_WEBHOOK_URL) throw new MonitorError("missing_discord_webhook");
         const id = demo ? await sendResetDemo(env.DISCORD_WEBHOOK_URL, username(env), fetch)
           : await sendDiscord(env.DISCORD_WEBHOOK_URL, username(env), null, fetch);
         return json({ sent: true, messageId: id });

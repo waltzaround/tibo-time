@@ -1,5 +1,7 @@
 # Never commit the filled-in .dev.vars file.
 DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/REPLACE_ID/REPLACE_TOKEN"
+# Configure Discord, Slack, or both. Remove unused webhook variables.
+# SLACK_WEBHOOK_URL="https://hooks.slack.com/services/REPLACE_TEAM/REPLACE_CHANNEL/REPLACE_SECRET"
 ADMIN_TOKEN="replace-with-a-long-random-secret"
 
 # Default source: bearer token from the official X Developer Console

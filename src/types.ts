@@ -9,7 +9,8 @@ export interface Env {
   RSS_FEED_URL?: string;
   X_BEARER_TOKEN?: string;
   TWITTERAPI_KEY?: string;
-  DISCORD_WEBHOOK_URL: string;
+  DISCORD_WEBHOOK_URL?: string;
+  SLACK_WEBHOOK_URL?: string;
   ADMIN_TOKEN: string;
 }
 
@@ -51,6 +52,8 @@ export interface Alert {
   attempts: number;
   analysis_json: string | null;
   context_json: string | null;
+  discord_message_id: string | null;
+  slack_sent_at: number | null;
 }
 
 export interface ResetAnalysis {
