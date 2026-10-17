@@ -1,12 +1,15 @@
 # Tibo Time
 
+<img width="475" height="398" alt="Screenshot 2026-10-18 at 7 10 29 AM" src="https://github.com/user-attachments/assets/91011061-a363-4b65-ba8c-f20dc0c292bf" />
+
+
 **Never miss a ChatGPT or Codex usage reset.**
 
 If you use Codex or ChatGPT heavily, surprise usage resets are pretty valuable. They mean refreshed limits and more opportunities to keep building.
 
 Every so often, Thibault "Tibo" Sottiaux from OpenAI announces additional usage resets on X. Unless you're constantly checking his posts, they're easy to miss.
 
-Tibo Time watches for these announcements and sends you a Discord notification when one appears.
+Tibo Time watches for these announcements and sends you a Discord/Slack notification when one appears.
 
 No refreshing X. Just a heads-up when there might be more usage available.
 
@@ -17,7 +20,7 @@ Tibo Time runs on Cloudflare Workers and checks [@thsottiaux](https://x.com/thso
 1. **Watches X** — Checks for new posts using the official X API.
 2. **Understands announcements** — Uses OpenAI to identify upcoming and completed resets, including announcements that don't explicitly say "reset".
 3. **Figures out the timing** — Interprets dates and times mentioned in posts, including relative references such as "tomorrow at 10am PT".
-4. **Notifies Discord** — Sends the announcement, original post and any inferred reset timing to your chosen channel.
+4. **Notifies Discord / Slack** — Sends the announcement, original post and any inferred reset timing to your chosen channel.
 
 It also follows linked posts within a conversation, so announcements spread across multiple replies aren't interpreted in isolation.
 
@@ -35,7 +38,7 @@ You'll need:
 - A Cloudflare account
 - An X API bearer token
 - An OpenAI API key
-- A Discord webhook
+- A Discord/Slack webhook
 
 **1. Clone and install**
 
@@ -139,7 +142,7 @@ Built with:
 - **Cloudflare D1** — Post history, classification results and delivery tracking
 - **Official X API** — Fetches new posts from Tibo
 - **OpenAI** — Classifies announcements and interprets reset timing
-- **Discord Webhooks** — Delivers notifications
+- **Discord/Slack Webhooks** — Delivers notifications
 
 The Worker stores processed posts, retries failures and avoids reclassifying the same post unnecessarily.
 
